@@ -3,6 +3,7 @@ import { getCurrentUser } from '@/lib/auth'
 import { writeFile, mkdir } from 'fs/promises'
 import { join } from 'path'
 import { existsSync } from 'fs'
+import { supabase } from '@/lib/supabase'
 
 export async function POST(request: NextRequest) {
     try {
@@ -43,33 +44,57 @@ export async function POST(request: NextRequest) {
             )
         }
 
-        // Validate file size (max 10MB)
-        const maxSize = 10 * 1024 * 1024
+        // Validate file size (max 5MB for Supabase free tier safety)
+        const maxSize = 5 * 1024 * 1024
         if (file.size > maxSize) {
             return NextResponse.json(
-                { error: 'حجم الملف يتجاوز الحد المسموح (10 ميجابايت)' },
+                { error: 'حجم الملف يتجاوز الحد المسموح (5 ميجابايت)' },
                 { status: 400 }
             )
         }
 
-        // Create user-specific upload directory
+        const timestamp = Date.now()
+        const sanitizedName = file.name.replace(/[^a-zA-Z0-9.-]/g, '_')
+        const fileName = `${timestamp}-${sanitizedName}`
+        const bytes = await file.arrayBuffer()
+        const buffer = Buffer.from(bytes)
+
+        // Try Supabase Storage first (for production)
+        if (supabase) {
+            const { data, error } = await supabase.storage
+                .from('attachments')
+                .upload(`${user.userId}/${fileName}`, buffer, {
+                    contentType: file.type,
+                    upsert: false
+                })
+
+            if (!error) {
+                const relativePath = `/api/files/${user.userId}/${fileName}`
+                return NextResponse.json({
+                    success: true,
+                    filePath: relativePath,
+                    fileName: file.name,
+                })
+            }
+            console.error('Supabase upload error:', error)
+            // If Supabase fails but we are on Vercel, we can't fallback to local fs
+            if (process.env.VERCEL) {
+                return NextResponse.json(
+                    { error: 'خطأ في حفظ الملف سحابياً. تأكد من إعدادات Supabase Storage' },
+                    { status: 500 }
+                )
+            }
+        }
+
+        // Fallback to Local Storage (for local dev)
         const uploadsDir = join(process.cwd(), 'uploads', user.userId.toString())
         if (!existsSync(uploadsDir)) {
             await mkdir(uploadsDir, { recursive: true })
         }
 
-        // Generate unique filename
-        const timestamp = Date.now()
-        const sanitizedName = file.name.replace(/[^a-zA-Z0-9.-]/g, '_')
-        const fileName = `${timestamp}-${sanitizedName}`
         const filePath = join(uploadsDir, fileName)
-
-        // Write file
-        const bytes = await file.arrayBuffer()
-        const buffer = Buffer.from(bytes)
         await writeFile(filePath, buffer)
 
-        // Return relative path for storage
         const relativePath = `/api/files/${user.userId}/${fileName}`
 
         return NextResponse.json({
@@ -85,3 +110,4 @@ export async function POST(request: NextRequest) {
         )
     }
 }
+
