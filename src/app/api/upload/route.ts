@@ -76,14 +76,20 @@ export async function POST(request: NextRequest) {
                     fileName: file.name,
                 })
             }
-            console.error('Supabase upload error:', error)
-            // If Supabase fails but we are on Vercel, we can't fallback to local fs
+            console.error('Supabase upload error details:', error)
+
+            // Provide more specific error info if possible
             if (process.env.VERCEL) {
                 return NextResponse.json(
-                    { error: 'خطأ في حفظ الملف سحابياً. تأكد من إعدادات Supabase Storage' },
+                    { error: `خطأ سحابي: ${error.message || 'تأكد من وجود الـ Bucket باسم attachments'}` },
                     { status: 500 }
                 )
             }
+        } else if (process.env.VERCEL) {
+            return NextResponse.json(
+                { error: 'إعدادات Supabase Storage غير مكتملة في Vercel' },
+                { status: 500 }
+            )
         }
 
         // Fallback to Local Storage (for local dev)
