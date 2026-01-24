@@ -36,6 +36,11 @@ self.addEventListener('fetch', (event) => {
         return;
     }
 
+    // Skip non-http requests (like extensions)
+    if (!event.request.url.startsWith('http')) {
+        return;
+    }
+
     event.respondWith(
         fetch(event.request)
             .then((response) => {
